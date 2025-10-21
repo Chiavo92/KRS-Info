@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wyszukiwarka KRS - API MS</title>
+    <style>
+        /* Proste style CSS, które możesz skopiować do sekcji <style> lub do pliku style.css */
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #wyniki { margin-top: 20px; border-top: 2px solid #eee; padding-top: 20px; }
+        .wynik-pole { margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .wynik-pole strong { display: inline-block; width: 150px; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>Wyszukiwarka Podmiotu w KRS</h1>
+
+    <div class="form-group">
+        <label for="krs">Wprowadź Numer KRS:</label>
+        <input type="text" id="krs" placeholder="Np. 0000123456" maxlength="10">
+    </div>
+
+    <div class="form-group">
+        <label for="rejestr">Wybierz Rodzaj Rejestru:</label>
+        <select id="rejestr">
+            <option value="P">P - Przedsiębiorcy</option>
+            <option value="S">S - Stowarzyszenia</option>
+        </select>
+    </div>
+
+    <button onclick="pobierzDaneKRS()">Szukaj</button>
+
+    <div id="wyniki">
+        </div>
+
+    <script>
+       const URL_BAZOWY = "https://api-krs.ms.gov.pl/api/krs/OdpisPelny/";
+
+/**
+ * Funkcja asynchroniczna do pobierania danych z API KRS.
+ */
+async function pobierzDaneKRS() {
+    // 1. Pobranie danych z formularza
+    const krs = document.getElementById('krs').value.trim();
+    const rejestr = document.getElementById('rejestr').value;
+    const wynikiContainer = document.getElementById('wyniki');
+
+    // Wyczyść poprzednie wyniki
+    wynikiContainer.innerHTML = ''; 
+
+    // 2. Walidacja danych
+    if (!krs || krs.length !== 10 || isNaN(krs)) {
+        wynikiContainer.innerHTML = '<p class="error">Proszę wprowadzić poprawny 10-cyfrowy numer KRS.</p>';
+        return;
+    }
+
+    // 3. Budowanie pełnego adresu URL
+    const pelnyURL = `${URL_BAZOWY}${krs}?rejestr=${rejestr}&format=json`;
+
+    // 4. Wyświetlenie informacji o ładowaniu
+    wynikiContainer.innerHTML = '<p>Ładowanie danych, proszę czekać...</p>';
+
+    // 5. Pobieranie danych z API (używamy fetch)
+    try {
+        const response = await fetch(pelnyURL);
+        const data = await response.json();
+
+        // 6. Obsługa statusów odpowiedzi
+        if (response.status === 200) {
+            wyswietlWyniki(data, wynikiContainer);
+        } else if (response.status === 404) {
+            wynikiContainer.innerHTML = `<p class="error">Błąd 404: Podmiot o numerze KRS: ${krs} nie został znaleziony w wybranym rejestrze (${rejestr}).</p>`;
+        } else {
+            wynikiContainer.innerHTML = `<p class="error">Wystąpił nieznany błąd (${response.status}) podczas pobierania danych z usługi.</p>`;
+        }
+
+    } catch (error) {
+        console.error("Błąd sieci lub parsowania JSON:", error);
+        wynikiContainer.innerHTML = '<p class="error">Wystąpił błąd połączenia sieciowego. Spróbuj ponownie.</p>';
+    }
+}
+/**
+ * Funkcja do wyświetlania kluczowych informacji z obiektu JSON
+ * wraz z rozszerzeniem o Sąd rejestrowy i Kapitał Zakładowy
+ * oraz generowaniem pełnego zapisu o firmie.
+ */
+function wyswietlWyniki(data, container) {
+    container.innerHTML = '<h2>Znalezione Dane:</h2>';
+
+    // Definicja stałej dla braku danych
+    const BRAK_DANYCH = 'Brak danych';
+    const BRAK_DANYCH_SKROCONY = 'Brak danych';
+    const BRAK_DANYCH_DLA_ZAPISU = 'nieznana'; // Użyte w sformalizowanym zapisie
+
+    // Sprawdzenie, czy istnieją dane podmiotu
+    const daneDzialu1 = data?.odpis?.dane?.dzial1;
+    const naglowek = data?.odpis?.naglowekP;
+    
+    if (!daneDzialu1 || !naglowek) {
+        container.innerHTML = `<p class="error">Nie znaleziono szczegółowych danych podmiotu w odpowiedzi API.</p>`;
+        return;
+    }
+    
+    const podmiot = daneDzialu1.danePodmiotu;
+    const siedzibaIAdres = daneDzialu1.siedzibaIAdres;
+    const kapital = daneDzialu1.kapital;
+
+    // Funkcja pomocnicza do pobierania ostatniego (najbardziej aktualnego) elementu z tablicy
+    const getLast = (array) => (array && array.length > 0) ? array[array.length - 1] : null;
+
+    // ----------------------------------------------------
+    // 1. ZBIERANIE KLUCZOWYCH DANYCH
+    // ----------------------------------------------------
+
+    // Nazwa/Firma
+    const aktualnaNazwaObj = getLast(podmiot?.nazwa);
+    const nazwa = aktualnaNazwaObj?.nazwa || BRAK_DANYCH;
+    const skroconaNazwa = nazwa.replace(/SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ|SPÓŁKA AKCYJNA|SP. Z O.O.|S.A./gi, '').trim(); // Do użycia w nagłówku zapisu
+
+    // Numer KRS (pobieramy z nagłówka, ponieważ jest stały)
+    const krsNumer = naglowek.numerKRS || BRAK_DANYCH;
+    
+    // Identyfikatory
+    const identyfikatoryObj = getLast(podmiot?.identyfikatory);
+    const nip = identyfikatoryObj?.identyfikatory?.nip || BRAK_DANYCH;
+    const regon = identyfikatoryObj?.identyfikatory?.regon || BRAK_DANYCH;
+    
+    // Adres
+    let pelnyAdres = BRAK_DANYCH;
+    let miejscowoscDlaZapisu = BRAK_DANYCH_DLA_ZAPISU;
+    let kodPocztowyDlaZapisu = '';
+    let ulicaDlaZapisu = '';
+    
+    const aktualnyAdresObj = getLast(siedzibaIAdres?.adres);
+
+    if (aktualnyAdresObj) {
+        const ulica = aktualnyAdresObj.ulica || '';
+        const numerDomu = aktualnyAdresObj.nrDomu || '';
+        const numerLokalu = aktualnyAdresObj.nrLokalu ? '/' + aktualnyAdresObj.nrLokalu : '';
+        const kodPocztowy = aktualnyAdresObj.kodPocztowy || '';
+        const miejscowosc = aktualnyAdresObj.miejscowosc || '';
+
+        // Składanie pełnego adresu
+        pelnyAdres = `${ulica} ${numerDomu}${numerLokalu}, ${kodPocztowy} ${miejscowosc}`;
+        pelnyAdres = pelnyAdres.replace(/\s{2,}/g, ' ').trim() || BRAK_DANYCH;
+
+        // Dane do zapisu sformalizowanego
+        miejscowoscDlaZapisu = miejscowosc;
+        kodPocztowyDlaZapisu = kodPocztowy ? `(${kodPocztowy})` : '';
+        ulicaDlaZapisu = `${ulica} ${numerDomu}${numerLokalu}`.trim();
+    }
+
+    // Sąd Rejestrowy (pobieramy z ostatniego wpisu)
+    let sadRejestrowy = BRAK_DANYCH;
+    const ostatniWpis = getLast(naglowek?.wpis.filter(w => w.oznaczenieSaduDokonujacegoWpisu && w.oznaczenieSaduDokonujacegoWpisu !== 'SYSTEM'));
+    if (ostatniWpis) {
+        sadRejestrowy = ostatniWpis.oznaczenieSaduDokonujacegoWpisu;
+    }
+
+    // Kapitał Zakładowy
+    let kapitalZakladowy = BRAK_DANYCH;
+    const wysokoscKapitaluObj = getLast(kapital?.wysokoscKapitaluZakladowego);
+    if (wysokoscKapitaluObj) {
+        const wartosc = wysokoscKapitaluObj.wartosc?.replace(',', '.') || '0';
+        const waluta = wysokoscKapitaluObj.waluta || 'PLN';
+        
+        // Formatowanie wartości (np. 15000000.00 -> 15 000 000)
+        const sformatowanaWartosc = parseFloat(wartosc).toLocaleString('pl-PL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        kapitalZakladowy = `${sformatowanaWartosc} ${waluta}`;
+    }
+
+    // ----------------------------------------------------
+    // 2. WYŚWIETLANIE WYNIKÓW W POLACH
+    // ----------------------------------------------------
+    container.innerHTML += `
+        <div class="wynik-pole">
+            <strong>Nazwa:</strong> <span>${nazwa}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>Numer KRS:</strong> <span>${krsNumer}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>NIP:</strong> <span>${nip}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>REGON:</strong> <span>${regon}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>Adres:</strong> <span>${pelnyAdres}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>Sąd Rejestrowy:</strong> <span>${sadRejestrowy}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>Kapitał Zakładowy:</strong> <span>${kapitalZakladowy}</span>
+        </div>
+    `;
+
+    // ----------------------------------------------------
+    // 3. GENEROWANIE PEŁNEGO ZAPISU O FIRMIE
+    // ----------------------------------------------------
+    // Wypisujemy formę prawną, zakładając, że API zwraca ostatnią aktywną (dla pewności pobieramy ostatnią)
+    const formaPrawnaObj = getLast(podmiot?.formaPrawna);
+    const formaPrawna = formaPrawnaObj?.formaPrawna || 'podmiot';
+    
+    // Budowanie frazy o KRS i Sądzie
+    const zapisOSadzie = sadRejestrowy.replace('SĄD REJONOWY DLA M.ST. ', 'Sąd Rejonowy w ')
+                                       .replace('SĄD REJONOWY DLA M. ST. ', 'Sąd Rejonowy w ')
+                                       .replace(', XII WYDZIAŁ GOSPODARCZY KRAJOWEGO REJESTRU SĄDOWEGO', ', XII Wydział Gospodarczy Krajowego Rejestru Sądowego')
+                                       .replace('KRAJOWEGO REJESTRU SĄDOWEGO', 'Krajowego Rejestru Sądowego');
+
+    const pelnyZapis = `
+        <p style="margin-top: 30px; font-size: 0.9em; line-height: 1.5;">
+            <strong>${nazwa}</strong> z siedzibą w ${miejscowoscDlaZapisu} ${kodPocztowyDlaZapisu} 
+            przy ul. ${ulicaDlaZapisu}, REGON: ${regon.replace(BRAK_DANYCH, BRAK_DANYCH_DLA_ZAPISU)}, 
+            NIP: ${nip.replace(BRAK_DANYCH, BRAK_DANYCH_DLA_ZAPISU)}, 
+            wpisaną do Rejestru Przedsiębiorców prowadzonego przez ${zapisOSadzie.replace(BRAK_DANYCH, BRAK_DANYCH_DLA_ZAPISU)} 
+            pod numerem KRS ${krsNumer.replace(BRAK_DANYCH, BRAK_DANYCH_DLA_ZAPISU)}, 
+            o kapitale zakładowym ${kapitalZakladowy.replace(BRAK_DANYCH, BRAK_DANYCH_DLA_ZAPISU)}.
+        </p>
+    `;
+
+    container.innerHTML += pelnyZapis;
+
+    // Sekcja z pełnymi danymi JSON (dla weryfikacji)
+    // container.innerHTML += `<details><summary>Pokaż pełne dane (JSON)</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+
+}
+    </script>
+</body>
+</html>
