@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wyszukiwarka KRS - API MS</title>
+    <style>
+        /* Proste style CSS, które możesz skopiować do sekcji <style> lub do pliku style.css */
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #wyniki { margin-top: 20px; border-top: 2px solid #eee; padding-top: 20px; }
+        .wynik-pole { margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .wynik-pole strong { display: inline-block; width: 150px; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>Wyszukiwarka Podmiotu w KRS</h1>
+
+    <div class="form-group">
+        <label for="krs">Wprowadź Numer KRS:</label>
+        <input type="text" id="krs" placeholder="Np. 0000123456" maxlength="10">
+    </div>
+
+    <div class="form-group">
+        <label for="rejestr">Wybierz Rodzaj Rejestru:</label>
+        <select id="rejestr">
+            <option value="P">P - Przedsiębiorcy</option>
+            <option value="S">S - Stowarzyszenia</option>
+        </select>
+    </div>
+
+    <button onclick="pobierzDaneKRS()">Szukaj</button>
+
+    <div id="wyniki">
+        </div>
+
+    <script>
+       const URL_BAZOWY = "https://api-krs.ms.gov.pl/api/krs/OdpisPelny/";
+
+/**
+ * Funkcja asynchroniczna do pobierania danych z API KRS.
+ */
+async function pobierzDaneKRS() {
+    // 1. Pobranie danych z formularza
+    const krs = document.getElementById('krs').value.trim();
+    const rejestr = document.getElementById('rejestr').value;
+    const wynikiContainer = document.getElementById('wyniki');
+
+    // Wyczyść poprzednie wyniki
+    wynikiContainer.innerHTML = ''; 
+
+    // 2. Walidacja danych
+    if (!krs || krs.length !== 10 || isNaN(krs)) {
+        wynikiContainer.innerHTML = '<p class="error">Proszę wprowadzić poprawny 10-cyfrowy numer KRS.</p>';
+        return;
+    }
+
+    // 3. Budowanie pełnego adresu URL
+    const pelnyURL = `${URL_BAZOWY}${krs}?rejestr=${rejestr}&format=json`;
+
+    // 4. Wyświetlenie informacji o ładowaniu
+    wynikiContainer.innerHTML = '<p>Ładowanie danych, proszę czekać...</p>';
+
+    // 5. Pobieranie danych z API (używamy fetch)
+    try {
+        const response = await fetch(pelnyURL);
+        const data = await response.json();
+
+        // 6. Obsługa statusów odpowiedzi
+        if (response.status === 200) {
+            wyswietlWyniki(data, wynikiContainer);
+        } else if (response.status === 404) {
+            wynikiContainer.innerHTML = `<p class="error">Błąd 404: Podmiot o numerze KRS: ${krs} nie został znaleziony w wybranym rejestrze (${rejestr}).</p>`;
+        } else {
+            wynikiContainer.innerHTML = `<p class="error">Wystąpił nieznany błąd (${response.status}) podczas pobierania danych z usługi.</p>`;
+        }
+
+    } catch (error) {
+        console.error("Błąd sieci lub parsowania JSON:", error);
+        wynikiContainer.innerHTML = '<p class="error">Wystąpił błąd połączenia sieciowego. Spróbuj ponownie.</p>';
+    }
+}
+
+/**
+ * Funkcja do wyświetlania kluczowych informacji z obiektu JSON.
+ * (Model JSON jest semantyczny i złożony, więc wyświetlamy tylko wybrane, kluczowe pola).
+ */
+function wyswietlWyniki(data, container) {
+    container.innerHTML = '<h2>Znalezione Dane:</h2>';
+
+    // Próba pobrania nazwy, adresu i NIP-u (ścieżki w JSON mogą się różnić!)
+    const podmiot = data.odpis.danePodmiotu;
+    const nazwa = podmiot?.firma || podmiot?.nazwa || 'Brak danych';
+    const krsNumer = podmiot?.numerKRS || 'Brak danych';
+    
+    // Adres - zakładamy, że jest w "siedziba i adres"
+    const adresSiedziby = podmiot?.siedzibaIAdres?.adres;
+    let pelnyAdres = 'Brak danych';
+
+    if (adresSiedziby) {
+        pelnyAdres = `${adresSiedziby.miejscowosc}, ${adresSiedziby.ulica} ${adresSiedziby.numerDomu}` + 
+                     (adresSiedziby.numerLokalu ? '/' + adresSiedziby.numerLokalu : '') + 
+                     `, ${adresSiedziby.kodPocztowy}`;
+    }
+
+    // Wyciąganie NIP i REGON
+    const nip = podmiot?.identyfikatory?.nip || 'Brak danych';
+    const regon = podmiot?.identyfikatory?.regon || 'Brak danych';
+
+    // Wyświetlanie kluczowych pól
+    container.innerHTML += `
+        <div class="wynik-pole">
+            <strong>Nazwa:</strong> <span>${nazwa}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>Numer KRS:</strong> <span>${krsNumer}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>NIP:</strong> <span>${nip}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>REGON:</strong> <span>${regon}</span>
+        </div>
+        <div class="wynik-pole">
+            <strong>Adres:</strong> <span>${pelnyAdres}</span>
+        </div>
+    `;
+
+    // Dla Marketing Specialist w CH Borek - dodatkowa sugestia wyświetlenia surowych danych
+    container.innerHTML += `<details><summary>Pokaż pełne dane (JSON)</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+}
+    </script>
+</body>
+</html>
